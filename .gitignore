@@ -1,3 +1,13 @@
+# xbps local state (created when xbps-install runs without an explicit rootdir)
+var/
+
+# Personal/session-private notes only (docs/priv_claude, docs/priv_docs, etc).
+# Team-facing docs (docs/team/) are NOT covered by this and are tracked normally.
+docs/priv_*
+
+# Logs
+logs/
+
 *.img
 *.xz
 *.iso

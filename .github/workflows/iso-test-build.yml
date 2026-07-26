@@ -1,0 +1,135 @@
+name: iso-test-build
+
+# Builds a test ISO from a PR and publishes it as a clearly-marked
+# pre-release. Only runs when the "test-me" label is added — not on every
+# push — so WIP commits don't burn CI time or clutter Releases.
+#
+# The watermark is meant to be persistently visible on screen, like
+# Windows' "Activate Windows" nag — not just something you see once before
+# the desktop loads, and not just the desktop wallpaper either (that's
+# covered the moment any window opens). So it's a small conky overlay,
+# pinned bottom-right and set to stay above normal windows, autostarted
+# alongside the session. Boot splash and /etc/issue are kept too as cheap
+# extra layers.
+#
+# NOTE: this workflow has not yet been exercised end-to-end on a real PR.
+# The build itself (mkiso.sh) takes several minutes and installs a lot of
+# packages; watch the first real run for disk-space/timeout issues on the
+# hosted runner.
+
+on:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  build-and-release:
+    if: github.event.label.name == 'test-me'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y imagemagick fonts-dejavu-core
+          chmod +x setup.sh
+          ./setup.sh
+
+      - name: Generate watermark image
+        run: |
+          set -euo pipefail
+          # Big, high-contrast, unmissable within a few seconds of looking
+          # at the screen — not a subtle corner nag. Banner text repeated
+          # top/center/bottom so it's still visible with icons/dock/panel
+          # partially covering the image.
+          MSG="TEST BUILD — PR #${{ github.event.pull_request.number }} — DO NOT INSTALL"
+          convert -size 1920x1080 xc:'#1a1a1a' \
+            -gravity North  -pointsize 56 -fill '#ff3b30' -font DejaVu-Sans-Bold -annotate +0+60  "$MSG" \
+            -gravity Center -pointsize 80 -fill '#ff3b30' -font DejaVu-Sans-Bold -annotate 0      "$MSG" \
+            -gravity South  -pointsize 56 -fill '#ff3b30' -font DejaVu-Sans-Bold -annotate +0+60  "$MSG" \
+            /tmp/testing-watermark.png
+          echo "WATERMARK_IMG=/tmp/testing-watermark.png" >> "$GITHUB_ENV"
+          echo "SPLASH_IMAGE=/tmp/testing-watermark.png" >> "$GITHUB_ENV"
+
+      - name: Prepare postsetup script (issue banner + on-screen watermark)
+        run: |
+          cat > /tmp/testing-watermark-postsetup.sh <<SCRIPT
+          #!/bin/sh
+          # Runs against the built ROOTFS before the initramfs is generated
+          # (mklive.sh -x). \$1 is the rootfs path.
+          set -e
+          ROOTFS="\$1"
+
+          # /etc/issue banner (pre-login console text)
+          {
+            echo "###############################################################"
+            echo "  TEST BUILD -- PR #${{ github.event.pull_request.number }} -- DO NOT INSTALL"
+            echo "  This is not an official CatOS release."
+            echo "###############################################################"
+            echo
+            cat "\$ROOTFS/etc/issue" 2>/dev/null
+          } > /tmp/issue.new
+          mv /tmp/issue.new "\$ROOTFS/etc/issue"
+
+          # On-screen watermark: conky, pinned bottom-right, override-
+          # redirected and hinted above/sticky so it stays on top of and
+          # visible over normal windows instead of just being the desktop
+          # background. Only pulled in for test builds, not real CatOS.
+          xbps-install -r "\$ROOTFS" -Sy conky
+
+          mkdir -p "\$ROOTFS/etc/xdg/catos-testing"
+          cat > "\$ROOTFS/etc/xdg/catos-testing/conky.conf" <<'CONKYCONF'
+          conky.config = {
+              own_window = true,
+              own_window_type = 'override',
+              own_window_hints = 'undecorated,above,sticky,skip_taskbar,skip_pager',
+              own_window_transparent = true,
+              own_window_argb_visual = true,
+              own_window_argb_value = 0,
+              alignment = 'bottom_right',
+              gap_x = 20,
+              gap_y = 40,
+              double_buffer = true,
+              use_xft = true,
+              font = 'DejaVu Sans Bold:size=14',
+              default_color = 'ff3b30',
+              update_interval = 30,
+          }
+          conky.text = [[
+          \${alignr}TEST BUILD -- PR #${{ github.event.pull_request.number }}
+          \${alignr}DO NOT INSTALL
+          ]]
+          CONKYCONF
+
+          mkdir -p "\$ROOTFS/etc/xdg/autostart"
+          cat > "\$ROOTFS/etc/xdg/autostart/catos-testing-watermark.desktop" <<'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=CatOS test-build watermark
+          Exec=conky -c /etc/xdg/catos-testing/conky.conf
+          OnlyShowIn=XFCE;
+          NoDisplay=true
+          DESKTOP
+          SCRIPT
+          chmod +x /tmp/testing-watermark-postsetup.sh
+
+      - name: Build ISO
+        run: ./.github/workflows/scripts/build-test-iso.sh
+
+      - name: Create/update pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="pr-${{ github.event.pull_request.number }}-test"
+          gh release delete "$TAG" --yes --cleanup-tag || true
+          gh release create "$TAG" catos-test.iso \
+            --prerelease \
+            --title "⚠️ TEST BUILD — pr-${{ github.event.pull_request.number }} — NOT FOR INSTALLATION" \
+            --notes "Automated test build from PR #${{ github.event.pull_request.number }} (commit ${{ github.event.pull_request.head.sha }}). This is **not** an official CatOS release — do not install it as a daily driver. An on-screen watermark, boot splash, and /etc/issue are all marked so this is obvious the moment you look at the screen."

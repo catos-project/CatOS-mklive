@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=CatOS wallpaper
+Exec=/usr/local/bin/catos-set-wallpaper.sh
+OnlyShowIn=XFCE;
+NoDisplay=true

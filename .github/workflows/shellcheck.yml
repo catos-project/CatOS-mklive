@@ -1,0 +1,42 @@
+name: shellcheck
+
+# Lints only the shell scripts actually touched by the PR, not the whole
+# repo — this codebase has pre-existing shellcheck warnings inherited from
+# upstream Void scripts that nobody's cleaning up as a side effect of an
+# unrelated PR. New/edited scripts are held to the real standard; untouched
+# legacy files are grandfathered.
+
+on:
+  pull_request:
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find changed shell scripts
+        id: changed
+        run: |
+          set -euo pipefail
+          mapfile -t scripts < <(
+            git diff --name-only --diff-filter=ACMR \
+              "${{ github.event.pull_request.base.sha }}" \
+              "${{ github.event.pull_request.head.sha }}" \
+              -- '*.sh'
+          )
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo "No changed shell scripts in this PR, skipping."
+            echo "has_scripts=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "has_scripts=true" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "${scripts[@]}" > /tmp/changed-scripts.txt
+          echo "Changed scripts:"
+          cat /tmp/changed-scripts.txt
+
+      - name: Run shellcheck on changed scripts
+        if: steps.changed.outputs.has_scripts == 'true'
+        run: xargs -a /tmp/changed-scripts.txt shellcheck -S warning

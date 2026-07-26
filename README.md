@@ -2,6 +2,17 @@
 
 # The Void Linux live image/rootfs generator and installer
 
+## Editing This README
+
+This file is generated — edit [`README.md.in`](README.md.in) instead, then run:
+
+```
+make README.md
+```
+
+The `-h` output of each `mk*.sh` script is appended automatically, so update
+the `OPTIONS` block in a script itself rather than editing that part here.
+
 ## Overview
 
 This repository contains several utilities:
@@ -16,6 +27,49 @@ This repository contains several utilities:
 * [*mknet.sh*](#mknetsh) - Script to generate netboot tarballs for Void
 * *installer.sh* - The Void Linux el-cheapo installer for x86
 * *release.sh* - interacts with GitHub CI to generate and sign images for releases
+
+## Getting Started
+
+Clone the repo and run the setup script once per machine:
+
+```
+git clone https://github.com/Michael104634/CatOS-mklive.git
+cd CatOS-mklive
+chmod +x setup.sh
+./setup.sh
+```
+
+`setup.sh` installs xbps (if the host doesn't already have it), installs the
+host build dependencies (`squashfs-tools`, `xorriso`, `git`, `make`), and
+builds mklive's own helper tools.
+
+Build an ISO:
+
+```
+sudo ./mkiso.sh -b gnome -- -I ./branding -o catos.iso
+```
+
+`-b` selects a desktop variant (`base`, `gnome`, `kde`, `xfce`, ...). Anything
+after `--` is passed through to `mklive.sh`.
+
+### Customizing the image
+
+[`branding/`](branding/) is where all CatOS-specific customization lives —
+see [`branding/README.md`](branding/README.md) for what goes there and how
+it's wired in. In short:
+
+* `-I <dir>` (mklive.sh) — overlay a directory structure onto the ROOTFS.
+  Point this at `./branding` to apply everything under it (mirrors the
+  target filesystem layout, e.g. `branding/etc/os-release`)
+* `-T <title>` (mklive.sh) — set the bootloader title (e.g. `-T "CatOS"`)
+* `-x <script>` (mklive.sh) — run a postsetup script against the ROOTFS
+  before the initramfs is built, for changes a plain file overlay can't do
+* `-p "<pkg> ..."` (mklive.sh) — install additional packages
+* `-g "<pkg> ..."` (mklive.sh) — exclude packages
+* `-S "<service> ..."` (mklive.sh) — enable services by default
+
+Pass these after `--` when using `mkiso.sh`. See `mklive.sh -h` for the full
+option list.
 
 ### Workflow
 
